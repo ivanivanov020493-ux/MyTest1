@@ -1,0 +1,11 @@
+# Ensure source and docs are treated as text in diffs
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Common binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
