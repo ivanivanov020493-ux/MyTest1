@@ -1,0 +1,67 @@
+name: Temp count Infostart sitemap URLs
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-count-infostart-sitemaps.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Count sitemap URLs
+        run: |
+          python - <<'PY'
+          import requests, re, xml.etree.ElementTree as ET
+          from urllib.parse import urlparse
+
+          headers={'User-Agent':'Mozilla/5.0'}
+          seen=set()
+          queue=['https://infostart.ru/sitemap.xml']
+          all_urls=[]
+          sitemap_files=[]
+          while queue:
+              u=queue.pop(0)
+              if u in seen: continue
+              seen.add(u)
+              r=requests.get(u,headers=headers,timeout=30)
+              print('SITEMAP',u,'status',r.status_code,'bytes',len(r.content),'type',r.headers.get('content-type'))
+              r.raise_for_status()
+              root=ET.fromstring(r.content)
+              tag=root.tag.rsplit('}',1)[-1]
+              locs=[(el.text or '').strip() for el in root.iter() if el.tag.rsplit('}',1)[-1]=='loc']
+              if tag=='sitemapindex':
+                  queue.extend(locs)
+                  sitemap_files.append((u,'index',len(locs)))
+              elif tag=='urlset':
+                  all_urls.extend(locs)
+                  sitemap_files.append((u,'urlset',len(locs)))
+              else:
+                  print('UNKNOWN_ROOT',tag)
+          uniq=list(dict.fromkeys(all_urls))
+          pats={
+            'tools': re.compile(r'^https?://(?:www\.)?infostart\.ru/1c/tools/\d+/?(?:\?.*)?$'),
+            'articles': re.compile(r'^https?://(?:www\.)?infostart\.ru/1c/articles/\d+/?(?:\?.*)?$'),
+            'public_numeric': re.compile(r'^https?://(?:www\.)?infostart\.ru/public/\d+/?(?:\?.*)?$'),
+            'any_1c_numeric': re.compile(r'^https?://(?:www\.)?infostart\.ru/1c/[^/]+/\d+/?(?:\?.*)?$'),
+          }
+          print('TOTAL_SITEMAP_FILES',len(sitemap_files))
+          print('TOTAL_UNIQUE_URLS',len(uniq))
+          for name,p in pats.items():
+              arr=[u for u in uniq if p.match(u)]
+              print(name.upper(),len(arr))
+              print(' sample:',*arr[:5],sep='\n  ')
+          # top URL path families
+          from collections import Counter
+          fam=Counter()
+          for u in uniq:
+              path=urlparse(u).path.strip('/').split('/')
+              key='/'.join(path[:2]) if len(path)>=2 else '/'.join(path)
+              fam[key]+=1
+          print('TOP_FAMILIES')
+          for k,v in fam.most_common(25): print(v,k)
+          PY
