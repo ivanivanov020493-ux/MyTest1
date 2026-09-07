@@ -1,0 +1,38 @@
+name: Temp diagnose Infostart
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-diagnose-infostart.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pip install requests beautifulsoup4
+      - name: Inspect real page markup
+        run: |
+          python - <<'PY'
+          import requests,re
+          from bs4 import BeautifulSoup
+          u='https://infostart.ru/1c/tools/2781935/'
+          r=requests.get(u,headers={'User-Agent':'Mozilla/5.0','Accept-Language':'ru-RU,ru;q=0.9'},timeout=30)
+          print('status',r.status_code,'encoding',r.encoding,'apparent',r.apparent_encoding)
+          s=BeautifulSoup(r.text,'html.parser')
+          lines=[' '.join(x.split()) for x in s.stripped_strings if ' '.join(x.split())]
+          print('=== DATE-LIKE LINES ===')
+          for i,x in enumerate(lines):
+            if any(k in x.lower() for k in ['создан','создание','обнов','изменен','публикац']):
+              print(i,repr(x))
+          print('=== EPF ROWS ===')
+          for tr in s.find_all('tr'):
+            tx=' '.join(tr.get_text(' ',strip=True).split())
+            if '.epf' in tx.lower() or '.ert' in tx.lower():
+              print('ROW:',repr(tx))
+              print('CELLS:',[ ' '.join(td.get_text(' ',strip=True).split()) for td in tr.find_all(['td','th'])])
+          print('=== STARTMONEY/RUB LINES ===')
+          for i,x in enumerate(lines):
+            if 'стартмани' in x.lower() or 'руб' in x.lower():
+              if i<500:
+                print(i,repr(x))
+          PY
