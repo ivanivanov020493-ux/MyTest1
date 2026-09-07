@@ -1,0 +1,92 @@
+name: Temp test Infostart scraper v3
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-test-infostart-scraper-v3.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test-scraper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download previously successful scraper artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/${{ github.repository }}/actions/artifacts/10034398143/zip > old.zip
+          unzip -q old.zip
+          sha256sum infostart_startmoney_scraper.py
+          python -m py_compile infostart_startmoney_scraper.py
+
+      - name: Apply fixes found by real markup diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('infostart_startmoney_scraper.py')
+          s=p.read_text(encoding='utf-8')
+
+          old='''        rubs = list(RUB_RE.finditer(text))\n        price_rub = int(re.sub(r"\\s+", "", rubs[-1].group("n"))) if rubs else None\n\n        # Обычно колонки: имя/метаданные | скачано | цена.\n        cells = [norm(td.get_text(" ", strip=True)) for td in tr.find_all(["td", "th"])]\n'''
+          new='''        # Обычно колонки: имя/метаданные | скачано | цена | StartMoney/скачать.\n        # Берём рублёвую цену именно из ценовой ячейки, чтобы не склеить\n        # количество скачиваний с ценой, например "2 3 000 руб.".\n        cells = [norm(td.get_text(" ", strip=True)) for td in tr.find_all(["td", "th"])]\n        price_rub = None\n        price_cells = cells[2:] if len(cells) >= 3 else cells\n        for cell in price_cells:\n            mm = RUB_RE.search(cell)\n            if mm:\n                price_rub = int(re.sub(r"\\s+", "", mm.group("n")))\n                break\n'''
+          assert old in s, 'price block not found'
+          s=s.replace(old,new)
+
+          old='''    created = None\n    updated = None\n    for line in lines:\n        if line.startswith("Создание "):\n            created = to_iso_date(line[len("Создание "):])\n        elif line.startswith("Обновление "):\n            updated = to_iso_date(line[len("Обновление "):])\n'''
+          new='''    created = None\n    updated = None\n    for i, line in enumerate(lines):\n        if line.startswith("Создание "):\n            created = to_iso_date(line[len("Создание "):])\n        elif line == "Создание" and i + 1 < len(lines):\n            created = to_iso_date(lines[i + 1])\n        elif line.startswith("Обновление "):\n            updated = to_iso_date(line[len("Обновление "):])\n        elif line == "Обновление" and i + 1 < len(lines):\n            updated = to_iso_date(lines[i + 1])\n'''
+          assert old in s, 'date block not found'
+          s=s.replace(old,new)
+
+          old='''    h1 = soup.find("h1")\n    short = None\n    if h1:\n'''
+          new='''    h1 = soup.find("h1")\n    short = None\n    meta_desc = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})\n    if meta_desc and meta_desc.get("content"):\n        short = norm(meta_desc.get("content"))\n    if h1 and not short:\n'''
+          assert old in s, 'description block not found'
+          s=s.replace(old,new)
+
+          p.write_text(s,encoding='utf-8')
+          PY
+          python -m py_compile infostart_startmoney_scraper.py
+          sha256sum infostart_startmoney_scraper.py
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+
+      - name: Run fixed scraper against real Infostart
+        run: |
+          python infostart_startmoney_scraper.py --source catalog --limit 10 --max-pages 10 --delay 1.2 --timeout 30 --out real_first10_v3
+
+      - name: Validate extracted data
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('real_first10_v3.json',encoding='utf-8'))
+          assert len(d)==10, len(d)
+          assert all(x['created_at'] for x in d), [('created',x['id']) for x in d if not x['created_at']]
+          assert all(x['updated_at'] for x in d), [('updated',x['id']) for x in d if not x['updated_at']]
+          assert all(x['file_type']=='Внешняя обработка (ert,epf)' for x in d)
+          assert all(x['access_type']=='Абонемент ($m)' for x in d)
+          assert all((x['startmoney'] or 0)>0 for x in d)
+          assert all(any(f.get('extension') in ('.epf','.ert') for f in x['files']) for x in d)
+          # На диагностической карточке 2781935 фактическая рублёвая цена = 3000.
+          t=next(x for x in d if x['id']==2781935)
+          prices=[f.get('price_rub') for f in t['files'] if f.get('price_rub')]
+          assert 3000 in prices, prices
+          print('VALIDATION_OK')
+          for x in d:
+              prices=[f.get('price_rub') for f in x['files'] if f.get('price_rub')]
+              print(x['id'],x['created_at'],x['updated_at'],x['startmoney'],prices,x['title'])
+          PY
+
+      - name: Upload verified results
+        uses: actions/upload-artifact@v4
+        with:
+          name: infostart-scraper-verified-v3
+          path: |
+            infostart_startmoney_scraper.py
+            real_first10_v3.json
+            real_first10_v3.csv
+            real_first10_v3.rejected.json
+          retention-days: 1
