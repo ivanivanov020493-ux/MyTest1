@@ -1,0 +1,29 @@
+name: Temp fetch 1C compat libs
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-fetch-1c-compat-libs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Ubuntu 24.04 runtime libraries
+        run: |
+          set -euo pipefail
+          mkdir -p pkgs
+          curl -fL --retry 5 -o pkgs/libicu74.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/i/icu/libicu74_74.2-1ubuntu3_amd64.deb
+          curl -fL --retry 5 -o pkgs/libjpeg-turbo8.deb \
+            https://archive.ubuntu.com/ubuntu/pool/main/libj/libjpeg-turbo/libjpeg-turbo8_2.1.5-2ubuntu2_amd64.deb
+          sha256sum pkgs/*
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: onec-debian-compat-libs
+          path: pkgs/*.deb
+          retention-days: 1
