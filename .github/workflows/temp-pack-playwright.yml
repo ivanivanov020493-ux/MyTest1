@@ -1,0 +1,36 @@
+name: Temp package Playwright dependencies
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-pack-playwright.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install exact web-test dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          set -euo pipefail
+          mkdir web-test
+          cd web-test
+          cat > package.json <<'EOF'
+          {"private":true,"type":"module","dependencies":{"playwright":"1.58.2"}}
+          EOF
+          npm install --ignore-scripts
+          tar -czf ../web-test-node_modules.tar.gz node_modules package.json package-lock.json
+          cd ..
+          sha256sum web-test-node_modules.tar.gz > web-test-node_modules.tar.gz.sha256
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-test-playwright-1.58.2
+          path: |
+            web-test-node_modules.tar.gz
+            web-test-node_modules.tar.gz.sha256
+          retention-days: 1
