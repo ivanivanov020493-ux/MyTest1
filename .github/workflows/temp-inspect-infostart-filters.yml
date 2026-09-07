@@ -1,0 +1,39 @@
+name: Temp inspect Infostart filters
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-inspect-infostart-filters.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pip install requests beautifulsoup4
+      - name: Inspect filters
+        run: |
+          python - <<'PY'
+          import requests
+          from bs4 import BeautifulSoup
+          u='https://infostart.ru/1c/tools/'
+          r=requests.get(u,headers={'User-Agent':'Mozilla/5.0','Accept-Language':'ru-RU,ru;q=0.9'},timeout=30)
+          r.raise_for_status()
+          s=BeautifulSoup(r.text,'html.parser')
+          print('SELECTS')
+          for sel in s.find_all('select'):
+              opts=[(' '.join(o.get_text(' ',strip=True).split()),o.get('value')) for o in sel.find_all('option')]
+              print('name=',sel.get('name'),'id=',sel.get('id'),'class=',sel.get('class'))
+              for t,v in opts[:200]: print('  ',repr(t),'=',repr(v))
+          print('INPUTS')
+          for inp in s.find_all('input'):
+              typ=(inp.get('type') or '').lower()
+              if typ in ('checkbox','radio','text','search','hidden'):
+                  print('type=',typ,'name=',inp.get('name'),'id=',inp.get('id'),'value=',inp.get('value'),'placeholder=',inp.get('placeholder'))
+          print('LABELS')
+          for lab in s.find_all('label'):
+              txt=' '.join(lab.get_text(' ',strip=True).split())
+              if txt: print(repr(txt),'for=',lab.get('for'))
+          PY
